@@ -110,17 +110,26 @@ Cette application illustre les principes de base des chatbots d'IA :
 # ─── Utilitaire : liste des modèles ─────────────────────────────────────────
 
 def get_model_list():
+    authorized_models = [
+        "Apertus-70B-Instruct-2509",
+        "mistralai/Ministral-3-14B-Instruct-2512",
+        "mistral-small-latest",
+        "mistral-medium-latest",
+        "Qwen/Qwen3.5-122B-A10B-FP8",
+        "google/gemma-4-31B-it",
+        "moonshotai/Kimi-K2.6",
+        "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-FP8",
+        "mistralai/Mistral-Small-4-119B-2603",
+    ]
     if client is None:
         return []
     try:
         models = client.models.list()
-        return [
-            m.id for m in models.data
-            if "text_generation" in getattr(m, "usages", [])
-        ]
+        available_ids = {m.id for m in models.data}
+        return [m for m in authorized_models if m in available_ids]
     except Exception as e:
         st.warning(f"Impossible de récupérer les modèles : {e}")
-        return ["modèle-par-défaut"]
+        return authorized_models
 
 
 # ─── MODE 1 : Complétion de texte (vrai modèle, streaming token par token) ──
