@@ -603,9 +603,9 @@ def chatbot_mode():
         ("🔢 Calcul mental",
          "Combien font 4 837 × 2 916 ? Donne uniquement le résultat, sans détailler.",
          "14 104 692 (vérifiable à la calculatrice — fait le lien avec le mode Agent)."),
-        ("🏛️ Date historique pointue",
-         "Quel jour exact (jour, mois, année) la première ligne du métro de Paris a-t-elle été inaugurée ?",
-         "19 juillet 1900 (ligne 1, Porte Maillot – Porte de Vincennes)."),
+        ("⛪ Actualité religieuse",
+        "Qui est l'actuel pape ?",
+        "Léon XIV (Robert Francis Prevost), élu en mai 2025. La plupart des modèles diront encore « François »."),
     ]
  
     show_tests = st.toggle(
