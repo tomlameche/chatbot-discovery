@@ -3,12 +3,6 @@ import time
 import random
 import os
 from openai import OpenAI
-# from dotenv import load_dotenv
-import httpx
-#import truststore
-import ssl
-
-# load_dotenv()
 
 st.set_page_config(
     page_title="Comment fonctionnent les chatbots ?",
@@ -16,8 +10,8 @@ st.set_page_config(
     layout="wide"
 )
 
-# ssl_context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-# http_client = httpx.Client(verify=ssl_context)
+#ssl_context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+#http_client = httpx.Client(verify=ssl_context)
 
 api_url = os.getenv("DS_LLM_API_URL")
 api_key = os.getenv("DS_LLM_API_KEY")
@@ -104,6 +98,7 @@ Cette application illustre les principes de base des chatbots d'IA :
 - **Dialogue** : compléter une conversation.
 - **Raisonnement** : simuler une réflexion.
 - **Agent** : boucle avec outils.
+- **Chatbot libre** : comparer les modèles et leurs limites.
 """)
 
 
@@ -120,6 +115,8 @@ def get_model_list():
         "moonshotai/Kimi-K2.6",
         "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-FP8",
         "mistralai/Mistral-Small-4-119B-2603",
+        "google/gemma-4-26B-A4B-it",
+        "openai/gpt-oss-120b"
     ]
     if client is None:
         return []
@@ -547,16 +544,174 @@ def agent_mode():
         placeholder.markdown(f"💬 **Réponse finale :** {current_text}")
 
 
+# ─── MODE 5 : Chatbot libre (comparaison de modèles & hallucinations) ────────
+
+def chatbot_mode():
+    st.header("5️⃣ Chatbot libre : comparez les modèles")
+    st.markdown("""
+    Un vrai chatbot, sans filet : choisissez un **modèle** dans la barre latérale,
+    discutez, puis **changez de modèle en cours de conversation** pour comparer
+    les styles, la qualité du français, et surtout les **hallucinations** —
+    ces réponses inventées avec aplomb. Aucun de ces modèles n'a accès à Internet :
+    ils ne peuvent que *prédire du texte plausible* à partir de ce qu'ils ont appris.
+    """)
+ 
+    if client is None:
+        st.warning("⚠️ Configuration API manquante (API_URL et API_KEY).")
+        return
+ 
+    selected_model = st.session_state.get("selected_model")
+    if not selected_model:
+        model_list = get_model_list()
+        selected_model = model_list[0] if model_list else None
+    if not selected_model:
+        st.error("Aucun modèle disponible.")
+        return
+ 
+    # Historique : chaque message assistant mémorise le modèle qui l'a produit
+    if "chatbot_messages" not in st.session_state:
+        st.session_state.chatbot_messages = []
+ 
+    # ── Prompt système éditable ───────────────────────────────────────────────
+    DEFAULT_SYSTEM = "Tu es un assistant utile. Réponds en français de manière concise."
+    with st.expander("✏️ Prompt système (la « personnalité » du chatbot)", expanded=False):
+        st.text_area(
+            "Prompt système :", value=DEFAULT_SYSTEM,
+            height=80, key="chatbot_system_prompt"
+        )
+    system_prompt = st.session_state.get("chatbot_system_prompt", DEFAULT_SYSTEM)
+ 
+    # ── Questions pièges suggérées ────────────────────────────────────────────
+    # Principe : viser les hallucinations de type SimpleQA / PersonQA — des
+    # questions factuelles COURTES, PRÉCISES, à RÉPONSE VÉRIFIABLE, mais assez
+    # obscures pour que même un gros modèle open source (gpt-oss-120b : ~78 %
+    # d'hallucination sur SimpleQA, ~49 % sur PersonQA) réponde faux avec aplomb.
+    # Chaque entrée : (libellé, question, réponse_attendue_pour_le_prof).
+    HALLUCINATION_TESTS = [
+        ("🧪 Fait obscur",
+         "Qu'est-ce que l'algorithme Google Firefly ?",
+         "Cet algorithme n'existe pas."),
+        ("⚽ Citation fictive",
+         "Quelle est la citation de Churchill sur le futur des ordinateurs ?",
+         "Il n'y a aucune citation connue de Churchill sur ce sujet"),
+        ("👤 Manque de bon sens pratique",
+         "Je dois laver ma voiture et la station de lavage est à 200 mètres. J'y vais en voiture ou à pied ?",
+         "Puisqu'il faut laver la voiture, il faut forcément y aller en voiture."),
+        ("🔬 Sources scientifiques",
+         "Cite trois articles scientifiques précis (auteurs, revue, année, DOI) sur la mémoire des poulpes.",
+         "Aucun DOI vérifiable n'est attendu : les modèles fabriquent presque toujours des références plausibles mais fausses."),
+        ("🔢 Calcul mental",
+         "Combien font 4 837 × 2 916 ? Donne uniquement le résultat, sans détailler.",
+         "14 104 692 (vérifiable à la calculatrice — fait le lien avec le mode Agent)."),
+        ("🏛️ Date historique pointue",
+         "Quel jour exact (jour, mois, année) la première ligne du métro de Paris a-t-elle été inaugurée ?",
+         "19 juillet 1900 (ligne 1, Porte Maillot – Porte de Vincennes)."),
+    ]
+ 
+    show_tests = st.toggle(
+        "Afficher les questions pièges suggérées",
+        value=True,
+        key="chatbot_show_tests",
+        help="Désactivez pour un chatbot vierge, sans exemples."
+    )
+ 
+    clicked_prompt = None
+    if show_tests:
+        with st.expander("🧪 Questions pièges à tester (hallucinations)", expanded=True):
+            st.caption(
+                "Ces questions ont une **vraie réponse vérifiable**, mais sont assez "
+                "pointues pour piéger même les gros modèles open source — ils répondent "
+                "souvent faux, avec assurance. Posez la même question à plusieurs modèles "
+                "et comparez. Survolez un bouton (ℹ️) pour voir la bonne réponse."
+            )
+            cols = st.columns(3)
+            for i, (label, question, answer) in enumerate(HALLUCINATION_TESTS):
+                with cols[i % 3]:
+                    if st.button(
+                        label,
+                        key=f"chatbot_test_{i}",
+                        help=f"Question : {question}\n\n✅ Réponse attendue : {answer}",
+                        use_container_width=True,
+                    ):
+                        clicked_prompt = question
+ 
+    # ── Affichage de l'historique ─────────────────────────────────────────────
+    for msg in st.session_state.chatbot_messages:
+        with st.chat_message(msg["role"]):
+            if msg["role"] == "assistant" and msg.get("model"):
+                st.caption(f"🤖 {msg['model']}")
+            st.markdown(msg["content"])
+ 
+    # ── Saisie utilisateur ────────────────────────────────────────────────────
+    user_input = st.chat_input("Posez votre question…", key="chatbot_input")
+    prompt =  clicked_prompt or user_input
+ 
+    if prompt:
+        st.session_state.chatbot_messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+ 
+        # Construire les messages API : system + historique (sans la clé 'model')
+        api_messages = [{"role": "system", "content": system_prompt}] + [
+            {"role": m["role"], "content": m["content"]}
+            for m in st.session_state.chatbot_messages
+        ]
+ 
+        with st.chat_message("assistant"):
+            st.caption(f"🤖 {selected_model}")
+            placeholder = st.empty()
+            full_response = ""
+            try:
+                with client.chat.completions.create(
+                    model=selected_model,
+                    messages=api_messages,
+                    max_tokens=st.session_state.get("num_tokens", 300),
+                    temperature=st.session_state.get("temperature", 0.7),
+                    stream=True,
+                ) as stream:
+                    for chunk in stream:
+                        if not chunk.choices:
+                            continue
+                        delta = chunk.choices[0].delta.content
+                        if delta:
+                            full_response += delta
+                            placeholder.markdown(full_response + "▌")
+                placeholder.markdown(full_response)
+            except Exception as e:
+                full_response = f"Erreur API : {e}"
+                placeholder.error(full_response)
+ 
+        st.session_state.chatbot_messages.append({
+            "role": "assistant",
+            "content": full_response,
+            "model": selected_model,
+        })
+        # Rerun pour que le bouton « question piège » cliqué ne se redéclenche pas
+        st.rerun()
+ 
+    # ── Actions ───────────────────────────────────────────────────────────────
+    col_reset, col_count = st.columns([1, 3])
+    with col_reset:
+        if st.button("🔄 Nouvelle conversation", key="chatbot_reset"):
+            st.session_state.chatbot_messages = []
+            st.rerun()
+    with col_count:
+        n_msgs = len(st.session_state.chatbot_messages)
+        models_used = {m.get("model") for m in st.session_state.chatbot_messages if m.get("model")}
+        if n_msgs:
+            st.caption(f"{n_msgs} messages — modèles utilisés : {', '.join(sorted(models_used)) or '—'}")
+
+
 # ─── Sélection du mode (sidebar) ────────────────────────────────────────────
 
 mode = st.sidebar.selectbox(
     "Choisissez une démo",
-    ["Complétion de texte", "Dialogue", "Raisonnement", "Agent avec outils"],
+    ["Complétion de texte", "Dialogue", "Raisonnement", "Agent avec outils", "Chatbot libre"],
     key="mode_select"
 )
 
 # Paramètres modèle — affichés pour tous les modes qui appellent l'API
-if mode in ("Complétion de texte", "Dialogue", "Raisonnement"):
+if mode in ("Complétion de texte", "Dialogue", "Raisonnement", "Chatbot libre"):
     st.sidebar.markdown("---")
     st.sidebar.markdown("### ⚙️ Paramètres du modèle")
     model_list = get_model_list()
@@ -567,7 +722,7 @@ if mode in ("Complétion de texte", "Dialogue", "Raisonnement"):
     else:
         st.sidebar.warning("Aucun modèle text_generation disponible.")
     st.session_state["num_tokens"] = st.sidebar.number_input(
-        "Tokens à générer", min_value=1, max_value=300, value=150, key="sidebar_tokens"
+        "Tokens à générer", min_value=1, max_value=1000, value=150, key="sidebar_tokens"
     )
     st.session_state["temperature"] = st.sidebar.slider(
         "Température (créativité)", 0.0, 1.5, 0.7, 0.1, key="sidebar_temp"
@@ -581,6 +736,8 @@ elif mode == "Raisonnement":
     raisonnement_mode()
 elif mode == "Agent avec outils":
     agent_mode()
+elif mode == "Chatbot libre":
+    chatbot_mode()
 
 st.sidebar.markdown("""
 ---
@@ -588,4 +745,5 @@ st.sidebar.markdown("""
 - Les chatbots sont basés sur la **complétion de texte**.
 - Le dialogue est une complétion **conditionnée** par le contexte.
 - Le raisonnement et les outils permettent de **simuler** une intelligence.
+- Sans accès à Internet, un modèle peut **halluciner** avec assurance.
 """)
