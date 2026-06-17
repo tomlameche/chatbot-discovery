@@ -745,5 +745,5 @@ st.sidebar.markdown("""
 - Les chatbots sont basés sur la **complétion de texte**.
 - Le dialogue est une complétion **conditionnée** par le contexte.
 - Le raisonnement et les outils permettent de **simuler** une intelligence.
-- Sans accès à Internet, un modèle peut **halluciner** avec assurance.
+- Sans accès à Internet pour vérifier une information, un modèle peut **halluciner** avec assurance (même avec d'ailleurs, mais moins souvent).
 """)
