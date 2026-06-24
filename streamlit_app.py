@@ -320,7 +320,7 @@ def dialogue_mode():
                             },
                             {"role": "user", "content": prompt_text}
                         ],
-                        max_tokens=st.session_state.get("num_tokens", 150),
+                        max_tokens=st.session_state.get("num_tokens", 1000),
                         temperature=st.session_state.get("temperature", 0.7),
                         stream=False,
                     )
@@ -722,7 +722,7 @@ if mode in ("Complétion de texte", "Dialogue", "Raisonnement", "Chatbot libre")
     else:
         st.sidebar.warning("Aucun modèle text_generation disponible.")
     st.session_state["num_tokens"] = st.sidebar.number_input(
-        "Tokens à générer", min_value=1, max_value=1000, value=150, key="sidebar_tokens"
+        "Tokens à générer", min_value=1, max_value=3000, value=1000, key="sidebar_tokens"
     )
     st.session_state["temperature"] = st.sidebar.slider(
         "Température (créativité)", 0.0, 1.5, 0.7, 0.1, key="sidebar_temp"
